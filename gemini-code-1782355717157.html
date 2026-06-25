@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Block Blast AI - リアルタイム自動認識・完全版</title>
+    <style>
+        body { text-align: center; font-family: sans-serif; background-color: #f7f9fa; padding: 20px; margin: 0; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        
+        /* リアルタイムコントロールエリア */
+        .control-panel { background: #e6f4ea; border: 2px solid #28a745; padding: 15px; border-radius: 8px; margin-bottom: 15px; text-align: left; }
+        .btn-stream { padding: 10px 20px; font-size: 15px; font-weight: bold; color: white; border: none; border-radius: 5px; cursor: pointer; margin-right: 10px; }
+        .btn-start { background-color: #28a745; }
+        .btn-stop { background-color: #dc3545; }
+        .status-badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; color: white; background-color: #6c757d; }
+        .status-active { background-color: #28a745; }
+
+        #canvas-container { position: relative; display: inline-block; margin-top: 10px; max-width: 100%; }
+        #view-canvas { max-width: 100%; border-radius: 8px; background: #eee; }
+        
+        .slider-group { margin: 15px 0; text-align: left; background: #f0f0f0; padding: 10px; border-radius: 5px; font-size: 14px; }
+        .slider-group label { display: inline-block; width: 110px; font-weight: bold; }
+        .slider-group input { width: 280px; vertical-align: middle; }
+        
+        .ai-section { margin-top: 20px; padding: 15px; border: 2px solid #007bff; border-radius: 8px; background: #f0f7ff; text-align: left; }
+        .slots-container { display: flex; justify-content: space-between; gap: 10px; margin-top: 10px; margin-bottom: 15px; }
+        .slot-box { flex: 1; display: flex; flex-direction: column; gap: 5px; }
+        .slot-card { background: white; border: 2px dashed #ccc; border-radius: 6px; padding: 8px; text-align: center; cursor: pointer; font-weight: bold; font-size: 13px; min-height: 90px; display: flex; flex-direction: column; justify-content: space-between; }
+        .slot-card.active { border-color: #007bff; background: #e6f0ff; color: #007bff; border-style: solid; }
+        
+        .slot-preview { font-family: monospace; font-size: 10px; color: #666; white-space: pre-line; background: #f8f9fa; border-radius: 4px; padding: 4px 0; margin-top: 5px; flex-grow: 1; display: flex; align-items: center; justify-content: center; line-height: 1.2; }
+        .slot-card.active .slot-preview { color: #007bff; background: #fff; }
+        
+        .rotate-btn { padding: 4px 0; font-size: 11px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; display: none; }
+        .rotate-btn:hover { background-color: #0056b3; }
+
+        .block-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 10px; }
+        .block-card { background: white; border: 1px solid #ccc; border-radius: 4px; padding: 6px 2px; font-size: 11px; cursor: pointer; font-weight: bold; text-align: center; color: #333; }
+        .block-card:hover { background: #f0f0f0; }
+        .block-shape-preview { font-family: monospace; font-size: 9px; color: #777; display: block; white-space: pre-line; margin-top: 2px; line-height: 1.2; }
+        
+        #log-output { text-align: left; background: #333; color: #fff; padding: 15px; border-radius: 5px; font-family: monospace; white-space: pre-wrap; margin-top: 15px; max-height: 180px; overflow-y: auto; font-size: 13px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Block Blast AI - リアルタイム自動認識・完全版</h2>
+    
+    <div class="control-panel">
+        <div style="margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+            <strong>📷 リアルタイム配信制御:</strong>
+            <span id="status-label" class="status-badge">配信停止中</span>
+        </div>
+        <button id="btn-stream-start" class="btn-stream btn-start">キャプチャ開始</button>
+        <button id="btn-stream-stop" class="btn-stream btn-stop" disabled>停止</button>
+        <span style="font-size: 12px; color: #555; margin-left: 5px;">※1秒ごとに自動解析します</span>
+    </div>
+
+    <div id="canvas-container">
+        <canvas id="view-canvas" width="500" height="700"></canvas>
+    </div>
+
+    <div class="slider-group">
+        <div>
+            <label>位置 (Y):</label>
+            <input type="range" id="slider-y" min="0" max="1500" value="200">
+        </div>
+        <div style="margin-top: 8px;">
+            <label>大きさ (Size):</label>
+            <input type="range" id="slider-size" min="100" max="1000" value="400">
+        </div>
+        <div style="margin-top: 8px;">
+            <label>位置 (X):</label>
+            <input type="range" id="slider-x" min="0" max="1000" value="50">
+        </div>
+    </div>
+
+    <div class="ai-section">
+        <strong style="color: #007bff;">手持ちブロック選択（自動計算連動）:</strong>
+        
+        <div class="slots-container">
+            <div class="slot-box">
+                <div class="slot-card active" id="slot-0" onclick="selectSlot(0)">
+                    手持ち ①
+                    <div class="slot-preview" id="preview-0">未選択</div>
+                </div>
+                <button class="rotate-btn" id="rot-btn-0" onclick="rotateSlotBlock(0)">↻ 90°回転</button>
+            </div>
+            <div class="slot-box">
+                <div class="slot-card" id="slot-1" onclick="selectSlot(1)">
+                    手持ち ②
+                    <div class="slot-preview" id="preview-1">未選択</div>
+                </div>
+                <button class="rotate-btn" id="rot-btn-1" onclick="rotateSlotBlock(1)">↻ 90°回転</button>
+            </div>
+            <div class="slot-box">
+                <div class="slot-card" id="slot-2" onclick="selectSlot(2)">
+                    手持ち ③
+                    <div class="slot-preview" id="preview-2">未選択</div>
+                </div>
+                <button class="rotate-btn" id="rot-btn-2" onclick="rotateSlotBlock(2)">↻ 90°回転</button>
+            </div>
+        </div>
+
+        <strong>【ブロック形状の一覧】</strong>
+        <div class="block-grid">
+            <div class="block-card" onclick="setBlockToActiveSlot('o_cube')">O型<span class="block-shape-preview">■■&#10;■■</span></div>
+            <div class="block-card" onclick="setBlockToActiveSlot('i_line')">I型(1x4)<span class="block-shape-preview">■■■■</span></div>
+            <div class="block-card" onclick="setBlockToActiveSlot('i_line_5')">I型(1x5)<span class="block-shape-preview">■■■■■</span></div>
+            <div class="block-card" onclick="setBlockToActiveSlot('r_rectangle_2x3')">2x3長方形<span class="block-shape-preview">■■■&#10;■■■</span></div>
+            <div class="block-card" onclick="setBlockToActiveSlot('l_shape')">L型<span class="block-shape-preview">■□&#10;■□&#10;■■</span></div>
+            <div class="block-card" onclick="setBlockToActiveSlot('j_shape')">J型<span class="block-shape-preview">□■&#10;□■&#10;■■</span></div>
+            <div class="block-card" onclick="setBlockToActiveSlot('t_shape')">T型<span class="block-shape-preview">■■■&#10;□■□</span></div>
+            <div class="block-card" onclick="setBlockToActiveSlot('z_shape')">Z型<span class="block-shape-preview">■■□&#10;□■■</span></div>
+            <div class="block-card" onclick="setBlockToActiveSlot('s_shape')">S型<span class="block-shape-preview">□■■&#10;■■□</span></div>
+            <div class="block-card" onclick="setBlockToActiveSlot('dot')">ドット<span class="block-shape-preview">■</span></div>
+            <div class="block-card" onclick="setBlockToActiveSlot('small_l')">小L<span class="block-shape-preview">■■&#10;■□</span></div>
+            <div class="block-card" onclick="setBlockToActiveSlot('x_shape')">X字<span class="block-shape-preview">□■□&#10;■■■&#10;□■□</span></div>
+            <div class="block-card" onclick="setBlockToActiveSlot('big_l')">特大L<span class="block-shape-preview">■□□&#10;■□□&#10;■■■</span></div>
+        </div>
+    </div>
+
+    <div id="log-output">システムログ...</div>
+</div>
+
+<video id="hidden-video" autoplay playsinline muted style="display:none;"></video>
+
+<script>
+let logOutput = document.getElementById('log-output');
+let viewCanvas = document.getElementById('view-canvas');
+let ctx = viewCanvas.getContext('2d');
+let videoEl = document.getElementById('hidden-video');
+
+let btnStart = document.getElementById('btn-stream-start');
+let btnStop = document.getElementById('btn-stream-stop');
+let statusLabel = document.getElementById('status-label');
+
+let sliderX = document.getElementById('slider-x');
+let sliderY = document.getElementById('slider-y');
+let sliderSize = document.getElementById('slider-size');
+
+let mediaStream = null;
+let captureIntervalId = null;
+
+let boxX = 50, boxY = 200, boxSize = 400;
+
+let currentGrid = null; 
+let activeSlotIndex = 0; 
+let slotMatrices = [null, null, null]; 
+let bestSequence = null; 
+
+// マスターデータ（1x5、2x3長方形を網羅）
+const BASE_BLOCKS = {
+    i_line:   [[1, 1, 1, 1]],
+    i_line_5: [[1, 1, 1, 1, 1]],
+    r_rectangle_2x3: [[1, 1, 1], [1, 1, 1]],
+    l_shape:  [[1, 0], [1, 0], [1, 1]],
+    j_shape:  [[0, 1], [0, 1], [1, 1]],
+    o_cube:   [[1, 1], [1, 1]],
+    t_shape:  [[1, 1, 1], [0, 1, 0]],
+    z_shape:  [[1, 1, 0], [0, 1, 1]],
+    s_shape:  [[0, 1, 1], [1, 1, 0]],
+    dot:      [[1]],
+    small_l:  [[1, 1], [1, 0]],
+    x_shape:  [[0, 1, 0], [1, 1, 1], [0, 1, 0]],
+    big_l:    [[1, 0, 0], [1, 0, 0], [1, 1, 1]]
+};
+
+function log(message) {
+    logOutput.innerText += message + "\n";
+    logOutput.scrollTop = logOutput.scrollHeight;
+}
+
+function rgbToHsv(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    let max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h, s, v = max;
+    let d = max - min;
+    s = max === 0 ? 0 : d / max;
+    if (max === min) h = 0;
+    else {
+        switch (max) {
+            case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+            case g: h = (b - r) / d + 2; break;
+            case b: h = (r - g) / d + 4; break;
+        }
+        h /= 6;
+    }
+    return [Math.floor(h * 180), Math.floor(s * 255), Math.floor(v * 255)];
+}
+
+function rotateMatrixClockwise(matrix) {
+    let r = matrix.length;
+    let c = matrix[0].length;
+    let rotated = Array.from({ length: c }, () => Array(r).fill(0));
+    for (let i = 0; i < r; i++) {
+        for (let j = 0; j < c; j++) {
+            rotated[j][r - 1 - i] = matrix[i][j];
+        }
+    }
+    return rotated;
+}
+
+function generatePreviewText(matrix) {
+    return matrix.map(row => row.map(cell => cell === 1 ? "■" : "□").join("")).join("\n");
+}
+
+function selectSlot(index) {
+    activeSlotIndex = index;
+    document.querySelectorAll('.slot-card').forEach((card, idx) => {
+        if(idx === index) card.classList.add('active');
+        else card.classList.remove('active');
+    });
+}
+
+function setBlockToActiveSlot(type) {
+    slotMatrices[activeSlotIndex] = BASE_BLOCKS[type].map(row => [...row]);
+    updateSlotUI(activeSlotIndex);
+    document.getElementById(`rot-btn-${activeSlotIndex}`).style.display = 'block';
+    
+    if (activeSlotIndex < 2) {
+        selectSlot(activeSlotIndex + 1);
+    }
+    if (currentGrid) runMultiAI();
+}
+
+function rotateSlotBlock(index) {
+    if (!slotMatrices[index]) return;
+    slotMatrices[index] = rotateMatrixClockwise(slotMatrices[index]);
+    updateSlotUI(index);
+    if (currentGrid) runMultiAI();
+}
+
+function updateSlotUI(index) {
+    let matrix = slotMatrices[index];
+    let previewEl = document.getElementById(`preview-${index}`);
+    if (matrix) {
+        previewEl.innerText = generatePreviewText(matrix);
+    } else {
+        previewEl.innerText = "未選択";
+    }
+}
+
+[sliderX, sliderY, sliderSize].forEach(slider => {
+    slider.addEventListener('input', () => {
+        boxX = Math.floor(Number(sliderX.value));
+        boxY = Math.floor(Number(sliderY.value));
+        boxSize = Math.floor(Number(sliderSize.value));
+    });
+});
+
+// 映像が流れ始めた瞬間に自動初期化する処理
+videoEl.addEventListener('play', () => {
+    setTimeout(() => {
+        let w = videoEl.videoWidth || 1280;
+        let h = videoEl.videoHeight || 720;
+        viewCanvas.width = w;
+        viewCanvas.height = h;
+        sliderX.max = w;
+        sliderY.max = h;
+        sliderSize.max = Math.min(w, h);
+        
+        boxSize = Math.floor(w * 0.45);
+        boxX = Math.floor((w - boxSize) / 2);
+        boxY = Math.floor(h * 0.2);
+        sliderX.value = boxX; sliderY.value = boxY; sliderSize.value = boxSize;
+        log("映像ストリームの取得に成功しました！画面を合わせてください。");
+    }, 600);
+});
+
+// キャプチャ開始
+btnStart.addEventListener('click', async () => {
+    try {
+        logOutput.innerText = "";
+        mediaStream = await navigator.mediaDevices.getDisplayMedia({
+            video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 10 } },
+            audio: false
+        });
+        videoEl.srcObject = mediaStream;
+
+        statusLabel.innerText = "リアルタイム解析中";
+        statusLabel.classList.add("status-active");
+        btnStart.disabled = true;
+        btnStop.disabled = false;
+
+        log("ポップアップでゲーム画面のウィンドウ、または画面全体を選んで共有してください。");
+
+        captureIntervalId = setInterval(() => {
+            processVideoFrame();
+        }, 1000);
+
+    } catch (err) {
+        log("キャプチャ開始エラー: " + err.message);
+    }
+});
+
+// キャプチャ停止
+btnStop.addEventListener('click', () => {
+    if (captureIntervalId) clearInterval(captureIntervalId);
+    if (mediaStream) {
+        mediaStream.getTracks().forEach(track => track.stop());
+    }
+    statusLabel.innerText = "配信停止中";
+    statusLabel.classList.remove("status-active");
+    btnStart.disabled = false;
+    btnStop.disabled = true;
+    log("リアルタイム解析を停止しました。");
+});
+
+function processVideoFrame() {
+    if (videoEl.paused || videoEl.ended) return;
+    ctx.drawImage(videoEl, 0, 0, viewCanvas.width, viewCanvas.height);
+    analyzeGridCore();
+    drawOverlay();
+}
+
+// 毎秒実行される画像解析コア
+function analyzeGridCore() {
+    try {
+        let cellSize = boxSize / 8;
+        const samplePoints = [{r:0,c:0}, {r:0,c:7}, {r:7,c:0}, {r:7,c:7}];
+        let bgH = 0, bgS = 0, bgV = 0;
+
+        samplePoints.forEach(p => {
+            let cx = Math.floor(boxX + (p.c * cellSize) + (cellSize / 2));
+            let cy = Math.floor(boxY + (p.r * cellSize) + (cellSize / 2));
+            let pixel = ctx.getImageData(cx, cy, 1, 1).data;
+            let hsv = rgbToHsv(pixel[0], pixel[1], pixel[2]);
+            bgH += hsv[0]; bgS += hsv[1]; bgV += hsv[2];
+        });
+        bgH = Math.floor(bgH / 4); bgS = Math.floor(bgS / 4); bgV = Math.floor(bgV / 4);
+
+        let cellDataList = [];
+        for (let r = 0; r < 8; r++) {
+            for (let c = 0; c < 8; c++) {
+                let centerX = Math.floor(boxX + (c * cellSize) + (cellSize / 2));
+                let centerY = Math.floor(boxY + (r * cellSize) + (cellSize / 2));
+                let pixel = ctx.getImageData(centerX, centerY, 1, 1).data;
+                let hsv = rgbToHsv(pixel[0], pixel[1], pixel[2]);
+                
+                let diffH = Math.abs(hsv[0] - bgH);
+                if (diffH > 90) diffH = 180 - diffH;
+                let diffS = Math.abs(hsv[1] - bgS);
+                let diffV = Math.abs(hsv[2] - bgV);
+                let dist = (diffH * 3) + diffS + diffV;
+                cellDataList.push({ r, c, dist });
+            }
+        }
+
+        let minDist = Math.min(...cellDataList.map(item => item.dist));
+        let dynamicThreshold = minDist + 55; 
+
+        let nextGrid = Array.from({ length: 8 }, () => Array(8).fill(0));
+        cellDataList.forEach(item => {
+            nextGrid[item.r][item.c] = item.dist > dynamicThreshold ? 1 : 0;
+        });
+
+        if (!currentGrid || JSON.stringify(currentGrid) !== JSON.stringify(nextGrid)) {
+            currentGrid = nextGrid;
+            runMultiAI();
+        }
+    } catch (e) {}
+}
+
+// 画面上へのオーバーレイ描画
+function drawOverlay() {
+    ctx.strokeStyle = 'red'; ctx.lineWidth = Math.max(3, Math.floor(viewCanvas.width / 150));
+    ctx.strokeRect(boxX, boxY, boxSize, boxSize);
+    
+    let cellSize = boxSize / 8;
+    ctx.strokeStyle = 'rgba(255, 0, 0, 0.25)'; ctx.lineWidth = 1;
+    for(let i = 1; i < 8; i++) {
+        ctx.beginPath(); ctx.moveTo(boxX + i * cellSize, boxY); ctx.lineTo(boxX + i * cellSize, boxY + boxSize); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(boxX, boxY + i * cellSize); ctx.lineTo(boxX + boxSize, boxY + i * cellSize); ctx.stroke();
+    }
+
+    if (bestSequence) {
+        let indicators = [
+            { fill: 'rgba(40, 167, 69, 0.4)', stroke: '#28a745', text: '①' },   
+            { fill: 'rgba(0, 123, 255, 0.4)', stroke: '#007bff', text: '②' },  
+            { fill: 'rgba(255, 193, 7, 0.45)', stroke: '#ffc107', text: '③' }   
+        ];
+
+        bestSequence.forEach((pos, idx) => {
+            let block = pos.matrix; 
+            let ind = indicators[idx];
+            let startX = boxX + pos.c * cellSize;
+            let startY = boxY + pos.r * cellSize;
+            
+            ctx.fillStyle = ind.fill;
+            ctx.strokeStyle = ind.stroke;
+            ctx.lineWidth = Math.max(3, Math.floor(viewCanvas.width / 120));
+            
+            for (let br = 0; br < block.length; br++) {
+                for (let bc = 0; bc < block[0].length; bc++) {
+                    if (block[br][bc] === 1) {
+                        ctx.fillRect(startX + bc * cellSize, startY + br * cellSize, cellSize, cellSize);
+                    }
+                }
+            }
+            ctx.strokeRect(startX, startY, block[0].length * cellSize, block.length * cellSize);
+            
+            ctx.fillStyle = '#fff';
+            ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
+            ctx.font = `bold ${Math.max(16, Math.floor(cellSize * 0.45))}px sans-serif`;
+            ctx.fillText(ind.text, startX + 6, startY + Math.max(18, Math.floor(cellSize * 0.4)) + 4);
+            ctx.shadowBlur = 0; 
+        });
+    }
+}
+
+function getPermutations(arr) {
+    if (arr.length === 0) return [[]];
+    let res = [];
+    for (let i = 0; i < arr.length; i++) {
+        let current = arr[i];
+        let rem = arr.slice(0, i).concat(arr.slice(i + 1));
+        let remPerms = getPermutations(rem);
+        for (let j = 0; j < remPerms.length; j++) {
+            res.push([current].concat(remPerms[j]));
+        }
+    }
+    return res;
+}
+
+// コンボ重視型のAI最適化エンジン
+function runMultiAI() {
+    if (!currentGrid) return;
+    let availableBlocks = [];
+    for (let i = 0; i < 3; i++) {
+        if (slotMatrices[i]) {
+            availableBlocks.push({ slotId: i, matrix: slotMatrices[i] });
+        }
+    }
+    if (availableBlocks.length === 0) return;
+
+    let maxGlobalScore = -1000000;
+    let finalBestSequence = null;
+    let orderPatterns = getPermutations(availableBlocks);
+
+    orderPatterns.forEach(sequence => {
+        searchSequence(0, currentGrid, sequence, []);
+    });
+
+    function searchSequence(depth, grid, seq, currentPlacements) {
+        if (depth === seq.length) {
+            let score = evaluateEndState(grid, currentPlacements);
+            if (score > maxGlobalScore) {
+                maxGlobalScore = score;
+                finalBestSequence = JSON.parse(JSON.stringify(currentPlacements));
+            }
+            return;
+        }
+
+        let target = seq[depth];
+        let block = target.matrix; 
+        let bRows = block.length;
+        let bCols = block[0].length;
+        let placedAny = false;
+
+        for (let r = 0; r <= 8 - bRows; r++) {
+            for (let c = 0; c <= 8 - bCols; c++) {
+                let canPlace = true;
+                for (let br = 0; br < bRows; br++) {
+                    for (let bc = 0; bc < bCols; bc++) {
+                        if (block[br][bc] === 1 && grid[r + br][c + bc] === 1) { canPlace = false; break; }
+                    }
+                    if (!canPlace) break;
+                }
+
+                if (canPlace) {
+                    placedAny = true;
+                    let tempGrid = grid.map(row => [...row]);
+                    for (let br = 0; br < bRows; br++) {
+                        for (let bc = 0; bc < bCols; bc++) {
+                            if (block[br][bc] === 1) tempGrid[r + br][c + bc] = 1;
+                        }
+                    }
+
+                    let rowsToClear = [];
+                    let colsToClear = [];
+                    for (let i = 0; i < 8; i++) { if (tempGrid[i].every(cell => cell === 1)) rowsToClear.push(i); }
+                    for (let j = 0; j < 8; j++) {
+                        let full = true; for (let i = 0; i < 8; i++) { if (tempGrid[i][j] === 0) { full = false; break; } }
+                        if (full) colsToClear.push(j);
+                    }
+                    rowsToClear.forEach(ri => tempGrid[ri].fill(0));
+                    colsToClear.forEach(ci => { for(let ri=0; ri<8; ri++) tempGrid[ri][ci] = 0; });
+                    let clearedLines = rowsToClear.length + colsToClear.length;
+
+                    currentPlacements.push({ slotId: target.slotId, matrix: block, r, c, clearedLines });
+                    searchSequence(depth + 1, tempGrid, seq, currentPlacements);
+                    currentPlacements.pop(); 
+                }
+            }
+        }
+
+        if (!placedAny && depth > 0) {
+            let score = evaluateEndState(grid, currentPlacements) - 50000 * (seq.length - depth);
+            if (score > maxGlobalScore) {
+                maxGlobalScore = score;
+                finalBestSequence = JSON.parse(JSON.stringify(currentPlacements));
+            }
+        }
+    }
+
+    function evaluateEndState(grid, placements) {
+        let score = 0;
+        let activeClears = 0; 
+        placements.forEach(p => {
+            if (p.clearedLines > 0) {
+                activeClears++;
+                score += p.clearedLines * 15000;
+            }
+        });
+
+        if (activeClears === 3) score += 60000; 
+        else if (activeClears === 2) score += 25000; 
+
+        let remainingBlocks = 0;
+        for(let r=0; r<8; r++) {
+            for(let c=0; c<8; c++) {
+                if(grid[r][c] === 1) remainingBlocks++;
+            }
+        }
+        score -= remainingBlocks * 300;
+
+        let potentialLines = 0;
+        for (let r = 0; r < 8; r++) {
+            let count = 0;
+            for (let c = 0; c < 8; c++) { if (grid[r][c] === 1) count++; }
+            if (count === 7) potentialLines++;
+        }
+        for (let c = 0; c < 8; c++) {
+            let count = 0;
+            for (let r = 0; r < 8; r++) { if (grid[r][c] === 1) count++; }
+            if (count === 7) potentialLines++;
+        }
+        score += potentialLines * 4000;
+        placements.forEach(p => { score += (p.r * 10) + (p.c * 2); });
+
+        return score;
+    }
+
+    if (finalBestSequence && finalBestSequence.length > 0) {
+        bestSequence = finalBestSequence;
+        logOutput.innerText = "【最新のAIおすすめ配置】\n";
+        bestSequence.forEach((step, index) => {
+            logOutput.innerText += `${index + 1}手目: [手持ち ${step.slotId + 1}] ➔ ${step.r + 1}行目, ${step.c + 1}列目\n`;
+        });
+    } else {
+        bestSequence = null;
+        logOutput.innerText = "【警告】おける組み合わせがありません。向きを変更してください。";
+    }
+}
+</script>
+
+</body>
+</html>
